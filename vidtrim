@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+
+import sys
+import os
+import argparse
+from pathlib import Path
+from subprocess import check_call
+
+PROGNAME = "vidtrim"
+
+HOME = Path.home()
+TRIMFILE = HOME / ".vidtrim_trimfile.txt"
+
+
+def edit(args):
+    check_call(["mplayer", "-edlout", TRIMFILE, args.video])
+    parts = TRIMFILE.open().read().split()
+    if parts[-1] != "0":
+        raise ValueError("Error reading trimfile, it's supposed to end in zero")
+
+    parts.pop()
+
+    if args.start:
+        parts = ["0.0"] + parts[1:]
+
+    if args.finish:
+        parts = parts[:-1] + ["999999999.0"]
+
+    if len(parts) != 2:
+        raise ValueError("More than two timecodes given")
+        
+    lead_in = parts[0]
+    lead_out = parts[1]
+    return lead_in, lead_out
+    
+
+def make_output_path(in_path):
+    main, ext = os.path.splitext(in_path)
+    for i in range(0,99):
+        out_path = main + ("_c%02d" % i) + ext
+        if not os.path.exists(out_path):
+            return out_path
+    raise ValueError("Unable to form output filename")
+        
+        
+def trim_video(in_path, lead_in, lead_out, out_path):
+    check_call(["ffmpeg", "-i", in_path, "-ss", lead_in, "-to", lead_out, "-c", "copy", out_path])
+  
+    
+def confirm(out_path):    
+    check_call(["mplayer", "-edlout", TRIMFILE, "-loop", "0", out_path])
+    parts = TRIMFILE.open().read().split()
+    if len(parts) > 1:
+        print("Discarding EDIT, try again")
+        os.unlink(out_path)
+    else:
+        print("Keeping Edit, it looks good")
+
+
+
+def main():
+    parser = argparse.ArgumentParser(prog=f'{PROGNAME}',
+            description=f"Trim videos using mplayer and ffmpeg.  Press 'i' when viewing video to indicate start and "
+                        f"end points, or use the -s and -f options to cut to the start or finish.  You are only allowed "
+                        f"two cut points, to extract more than one sequence of video from different points in the "
+                        f"file just run this twice.  The output filename containing the cut video will be derived from "
+                        f"the input file, e.g. file.mp4 will become file_c01.mp4, file_c02.mp4 depending on how many "
+                        f"times you run {PROGNAME}")
+
+    parser.add_argument("-s", "--start", default=False, action="store_true",
+                        help="Shift the timecode of the first press of the 'i' key to zero")
+
+    parser.add_argument("-f", "--finish", default=False, action="store_true",
+                        help="Shift the timecode of the second press of the 'i' key to infinity")
+
+    parser.add_argument("video", default=False,
+                        help="Video file to edit.")
+
+    args = parser.parse_args()
+    return args
+
+
+if __name__ == "__main__":
+    args = main()
+    lead_in, lead_out = edit(args)
+    out_path = make_output_path(args.video)
+    trim_video(args.video, lead_in, lead_out, out_path)
+    confirm(out_path)    
+    
